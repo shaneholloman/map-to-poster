@@ -210,13 +210,13 @@ def load_fonts():
         'regular': os.path.join(FONTS_DIR, 'Roboto-Regular.ttf'),
         'light': os.path.join(FONTS_DIR, 'Roboto-Light.ttf')
     }
-    
+
     # Verify fonts exist
     for weight, path in fonts.items():
         if not os.path.exists(path):
             print(f"WARNING: Font not found: {path}")
             return None
-    
+
     return fonts
 
 FONTS = load_fonts()
@@ -227,7 +227,7 @@ def generate_output_filename(city, theme_name, output_format):
     """
     if not os.path.exists(POSTERS_DIR):
         os.makedirs(POSTERS_DIR)
-    
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     city_slug = city.lower().replace(' ', '_')
     ext = output_format.lower()
@@ -241,7 +241,7 @@ def get_available_themes():
     if not os.path.exists(THEMES_DIR):
         os.makedirs(THEMES_DIR)
         return []
-    
+
     themes = []
     for file in sorted(os.listdir(THEMES_DIR)):
         if file.endswith('.json'):
@@ -254,7 +254,7 @@ def load_theme(theme_name="feature_based"):
     Load theme from JSON file in themes directory.
     """
     theme_file = os.path.join(THEMES_DIR, f"{theme_name}.json")
-    
+
     if not os.path.exists(theme_file):
         print(f"WARNING: Theme file '{theme_file}' not found. Using default feature_based theme.")
         # Fallback to embedded default theme
@@ -299,13 +299,13 @@ def create_gradient_fade(ax, color, location='bottom', zorder=10):
     """
     vals = np.linspace(0, 1, 256).reshape(-1, 1)
     gradient = np.hstack((vals, vals))
-    
+
     rgb = mcolors.to_rgb(color)
     my_colors = np.zeros((256, 4))
     my_colors[:, 0] = rgb[0]
     my_colors[:, 1] = rgb[1]
     my_colors[:, 2] = rgb[2]
-    
+
     if location == 'bottom':
         my_colors[:, 3] = np.linspace(1, 0, 256)
         extent_y_start = 0
@@ -316,15 +316,15 @@ def create_gradient_fade(ax, color, location='bottom', zorder=10):
         extent_y_end = 1.0
 
     custom_cmap = mcolors.ListedColormap(my_colors)
-    
+
     xlim = ax.get_xlim()
     ylim = ax.get_ylim()
     y_range = ylim[1] - ylim[0]
-    
+
     y_bottom = ylim[0] + y_range * extent_y_start
     y_top = ylim[0] + y_range * extent_y_end
-    
-    ax.imshow(gradient, extent=[xlim[0], xlim[1], y_bottom, y_top], 
+
+    ax.imshow(gradient, extent=[xlim[0], xlim[1], y_bottom, y_top],
               aspect='auto', cmap=custom_cmap, zorder=zorder, origin='lower')
 
 def get_edge_colors_by_type(G):
@@ -333,15 +333,15 @@ def get_edge_colors_by_type(G):
     Returns a list of colors corresponding to each edge in the graph.
     """
     edge_colors = []
-    
+
     for u, v, data in G.edges(data=True):
         # Get the highway type (can be a list or string)
         highway = data.get('highway', 'unclassified')
-        
+
         # Handle list of highway types (take the first one)
         if isinstance(highway, list):
             highway = highway[0] if highway else 'unclassified'
-        
+
         # Assign color based on road type
         if highway in ['motorway', 'motorway_link']:
             color = THEME['road_motorway']
@@ -355,9 +355,9 @@ def get_edge_colors_by_type(G):
             color = THEME['road_residential']
         else:
             color = THEME['road_default']
-        
+
         edge_colors.append(color)
-    
+
     return edge_colors
 
 def get_edge_widths_by_type(G):
@@ -366,13 +366,13 @@ def get_edge_widths_by_type(G):
     Major roads get thicker lines.
     """
     edge_widths = []
-    
+
     for u, v, data in G.edges(data=True):
         highway = data.get('highway', 'unclassified')
-        
+
         if isinstance(highway, list):
             highway = highway[0] if highway else 'unclassified'
-        
+
         # Assign width based on road importance
         if highway in ['motorway', 'motorway_link']:
             width = 1.2
@@ -384,9 +384,9 @@ def get_edge_widths_by_type(G):
             width = 0.6
         else:
             width = 0.4
-        
+
         edge_widths.append(width)
-    
+
     return edge_widths
 
 def get_coordinates(city, country):
@@ -441,7 +441,7 @@ def get_coordinates(city, country):
         return (location.latitude, location.longitude)
     else:
         raise ValueError(f"Could not find coordinates for {city}, {country}")
-    
+
 def get_crop_limits(G_proj, center_lat_lon, fig, dist):
     """
     Crop inward to preserve aspect ratio while guaranteeing
@@ -1120,9 +1120,6 @@ def create_3d_poster(
     fig.text(0.5, 0.07, coords_text, ha='center', va='bottom',
              fontproperties=font_coords, color=THEME['text'], alpha=0.7, zorder=11)
 
-    # Attribution
-    fig.text(0.98, 0.02, "OpenStreetMap contributors", ha='right', va='bottom',
-             fontproperties=font_attr, color=THEME['text'], alpha=0.5, zorder=11)
 
     # Save
     print("-" * 50)
@@ -1176,7 +1173,7 @@ def create_poster(city, country, point, dist, output_file, output_format, width=
 
     print("-" * 50)
     print("[OK] Data fetch complete")
-    
+
     # 2. Setup Plot
     print("Rendering map...")
     fig, ax = plt.subplots(figsize=(width, height), facecolor=THEME['bg'])
@@ -1185,7 +1182,7 @@ def create_poster(city, country, point, dist, output_file, output_format, width=
 
     # Project graph to a metric CRS so distances and aspect are linear (meters)
     G_proj = ox.project_graph(G)
-    
+
     # 3. Plot Layers
     # Layer 1: Polygons (filter to only plot polygon/multipolygon geometries, not points)
     if water is not None and not water.empty:
@@ -1198,7 +1195,7 @@ def create_poster(city, country, point, dist, output_file, output_format, width=
             except Exception:
                 water_polys = water_polys.to_crs(G_proj.graph['crs'])
             water_polys.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=1)
-    
+
     if parks is not None and not parks.empty:
         # Filter to only polygon/multipolygon geometries to avoid point features showing as dots
         parks_polys = parks[parks.geometry.type.isin(['Polygon', 'MultiPolygon'])]
@@ -1209,7 +1206,7 @@ def create_poster(city, country, point, dist, output_file, output_format, width=
             except Exception:
                 parks_polys = parks_polys.to_crs(G_proj.graph['crs'])
             parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=2)
-    
+
     # Layer 2: Roads with hierarchy coloring
     print("Applying road hierarchy colors...")
     edge_colors = get_edge_colors_by_type(G_proj)
@@ -1228,20 +1225,20 @@ def create_poster(city, country, point, dist, output_file, output_format, width=
     ax.set_aspect('equal', adjustable='box')
     ax.set_xlim(crop_xlim)
     ax.set_ylim(crop_ylim)
-    
+
     # Layer 3: Gradients (Top and Bottom)
     create_gradient_fade(ax, THEME['gradient_color'], location='bottom', zorder=10)
     create_gradient_fade(ax, THEME['gradient_color'], location='top', zorder=10)
-    
+
     # Calculate scale factor based on poster width (reference width 12 inches)
     scale_factor = width / 12.0
-    
+
     # Base font sizes (at 12 inches width)
     BASE_MAIN = 60
     BASE_SUB = 22
     BASE_COORDS = 14
     BASE_ATTR = 8
-    
+
     # 4. Typography using Roboto font
     if FONTS:
         font_sub = FontProperties(fname=FONTS['light'], size=BASE_SUB * scale_factor)
@@ -1252,21 +1249,21 @@ def create_poster(city, country, point, dist, output_file, output_format, width=
         font_sub = FontProperties(family='monospace', weight='normal', size=BASE_SUB * scale_factor)
         font_coords = FontProperties(family='monospace', size=BASE_COORDS * scale_factor)
         font_attr = FontProperties(family='monospace', size=BASE_ATTR * scale_factor)
-    
+
     display_city = city.upper()
 
     # Dynamically adjust font size based on city name length to prevent truncation
     # We use the already scaled "main" font size as the starting point.
     base_adjusted_main = BASE_MAIN * scale_factor
     city_char_count = len(city)
-    
+
     # Heuristic: If length is > 10, start reducing.
     if city_char_count > 10:
         length_factor = 10 / city_char_count
-        adjusted_font_size = max(base_adjusted_main * length_factor, 10 * scale_factor) 
+        adjusted_font_size = max(base_adjusted_main * length_factor, 10 * scale_factor)
     else:
         adjusted_font_size = base_adjusted_main
-    
+
     if FONTS:
         font_main_adjusted = FontProperties(fname=FONTS['black'], size=adjusted_font_size)
     else:
@@ -1275,20 +1272,20 @@ def create_poster(city, country, point, dist, output_file, output_format, width=
     # --- BOTTOM TEXT ---
     ax.text(0.5, 0.14, display_city, transform=ax.transAxes,
             color=THEME['text'], ha='center', fontproperties=font_main_adjusted, zorder=11)
-    
+
     country_text = country_label if country_label is not None else country
     ax.text(0.5, 0.10, country_text.upper(), transform=ax.transAxes,
             color=THEME['text'], ha='center', fontproperties=font_sub, zorder=11)
-    
+
     lat, lon = point
     coords = f"{lat:.4f}° N / {lon:.4f}° E" if lat >= 0 else f"{abs(lat):.4f}° S / {lon:.4f}° E"
     if lon < 0:
         coords = coords.replace("E", "W")
-    
+
     ax.text(0.5, 0.07, coords, transform=ax.transAxes,
             color=THEME['text'], alpha=0.7, ha='center', fontproperties=font_coords, zorder=11)
-    
-    ax.plot([0.4, 0.6], [0.125, 0.125], transform=ax.transAxes, 
+
+    ax.plot([0.4, 0.6], [0.125, 0.125], transform=ax.transAxes,
             color=THEME['text'], linewidth=1 * scale_factor, zorder=11)
 
     # --- ATTRIBUTION (bottom right) ---
@@ -1296,9 +1293,9 @@ def create_poster(city, country, point, dist, output_file, output_format, width=
         font_attr = FontProperties(fname=FONTS['light'], size=8)
     else:
         font_attr = FontProperties(family='monospace', size=8)
-    
+
     ax.text(0.98, 0.02, "© OpenStreetMap contributors", transform=ax.transAxes,
-            color=THEME['text'], alpha=0.5, ha='right', va='bottom', 
+            color=THEME['text'], alpha=0.5, ha='right', va='bottom',
             fontproperties=font_attr, zorder=11)
 
     # 5. Save
@@ -1405,7 +1402,7 @@ def list_themes():
     if not available_themes:
         print("No themes found in 'themes/' directory.")
         return
-    
+
     print("\nAvailable Themes:")
     print("-" * 60)
     for theme_name in available_themes:
@@ -1436,7 +1433,7 @@ Examples:
   uv run map.py --list-themes
         """
     )
-    
+
     parser.add_argument('--city', '-c', type=str, help='City name')
     parser.add_argument('--country', '-C', type=str, help='Country name')
     parser.add_argument('--country-label', dest='country_label', type=str, help='Override country text displayed on poster')
@@ -1477,12 +1474,12 @@ Examples:
                        help='Clear all cached data')
 
     args = parser.parse_args()
-    
+
     # If no arguments provided, show examples
     if len(sys.argv) == 1:
         print_examples()
         sys.exit(0)
-    
+
     # List themes if requested
     if args.list_themes:
         list_themes()
@@ -1513,7 +1510,7 @@ Examples:
         print("Error: --city and --country are required.\n")
         print_examples()
         sys.exit(1)
-    
+
     available_themes = get_available_themes()
     if not available_themes:
         print("No themes found in 'themes/' directory.")
@@ -1527,11 +1524,11 @@ Examples:
             print(f"Available themes: {', '.join(available_themes)}")
             os.sys.exit(1)
         themes_to_generate = [args.theme]
-    
+
     print("=" * 50)
     print("City Map Poster Generator")
     print("=" * 50)
-    
+
     # Get coordinates and generate poster
     try:
         coords = get_coordinates(args.city, args.country)
@@ -1564,7 +1561,7 @@ Examples:
         print("\n" + "=" * 50)
         print("[OK] Poster generation complete!")
         print("=" * 50)
-        
+
     except Exception as e:
         print(f"\nERROR: Error: {e}")
         import traceback
