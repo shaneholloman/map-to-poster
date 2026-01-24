@@ -1071,16 +1071,13 @@ def create_3d_poster(
     BASE_MAIN = 60
     BASE_SUB = 22
     BASE_COORDS = 14
-    BASE_ATTR = 8
 
     if FONTS:
         font_sub = FontProperties(fname=FONTS['light'], size=BASE_SUB * scale_factor)
         font_coords = FontProperties(fname=FONTS['regular'], size=BASE_COORDS * scale_factor)
-        font_attr = FontProperties(fname=FONTS['light'], size=BASE_ATTR * scale_factor)
     else:
         font_sub = FontProperties(family='monospace', weight='normal', size=BASE_SUB * scale_factor)
         font_coords = FontProperties(family='monospace', size=BASE_COORDS * scale_factor)
-        font_attr = FontProperties(family='monospace', size=BASE_ATTR * scale_factor)
 
     # City name (uppercase)
     display_city = city.upper()
@@ -1237,18 +1234,15 @@ def create_poster(city, country, point, dist, output_file, output_format, width=
     BASE_MAIN = 60
     BASE_SUB = 22
     BASE_COORDS = 14
-    BASE_ATTR = 8
 
     # 4. Typography using Roboto font
     if FONTS:
         font_sub = FontProperties(fname=FONTS['light'], size=BASE_SUB * scale_factor)
         font_coords = FontProperties(fname=FONTS['regular'], size=BASE_COORDS * scale_factor)
-        font_attr = FontProperties(fname=FONTS['light'], size=BASE_ATTR * scale_factor)
     else:
         # Fallback to system fonts
         font_sub = FontProperties(family='monospace', weight='normal', size=BASE_SUB * scale_factor)
         font_coords = FontProperties(family='monospace', size=BASE_COORDS * scale_factor)
-        font_attr = FontProperties(family='monospace', size=BASE_ATTR * scale_factor)
 
     display_city = city.upper()
 
@@ -1287,16 +1281,6 @@ def create_poster(city, country, point, dist, output_file, output_format, width=
 
     ax.plot([0.4, 0.6], [0.125, 0.125], transform=ax.transAxes,
             color=THEME['text'], linewidth=1 * scale_factor, zorder=11)
-
-    # --- ATTRIBUTION (bottom right) ---
-    if FONTS:
-        font_attr = FontProperties(fname=FONTS['light'], size=8)
-    else:
-        font_attr = FontProperties(family='monospace', size=8)
-
-    ax.text(0.98, 0.02, "© OpenStreetMap contributors", transform=ax.transAxes,
-            color=THEME['text'], alpha=0.5, ha='right', va='bottom',
-            fontproperties=font_attr, zorder=11)
 
     # 5. Save
     print(f"Saving to {output_file}...")
