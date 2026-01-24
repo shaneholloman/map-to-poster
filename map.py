@@ -1082,8 +1082,8 @@ def create_3d_poster(
         font_coords = FontProperties(family='monospace', size=BASE_COORDS * scale_factor)
         font_attr = FontProperties(family='monospace', size=BASE_ATTR * scale_factor)
 
-    # Spaced city name like 2D version
-    spaced_city = "  ".join(list(city.upper()))
+    # City name (uppercase)
+    display_city = city.upper()
 
     # Adjust font size for long city names
     base_adjusted_main = BASE_MAIN * scale_factor
@@ -1100,7 +1100,7 @@ def create_3d_poster(
         font_main_adjusted = FontProperties(family='monospace', weight='black', size=adjusted_font_size)
 
     # Text overlay (using figure coordinates)
-    fig.text(0.5, 0.14, spaced_city, ha='center', va='bottom',
+    fig.text(0.5, 0.14, display_city, ha='center', va='bottom',
              fontproperties=font_main_adjusted, color=THEME['text'], zorder=11)
 
     # Decorative line
@@ -1253,8 +1253,8 @@ def create_poster(city, country, point, dist, output_file, output_format, width=
         font_coords = FontProperties(family='monospace', size=BASE_COORDS * scale_factor)
         font_attr = FontProperties(family='monospace', size=BASE_ATTR * scale_factor)
     
-    spaced_city = "  ".join(list(city.upper()))
-    
+    display_city = city.upper()
+
     # Dynamically adjust font size based on city name length to prevent truncation
     # We use the already scaled "main" font size as the starting point.
     base_adjusted_main = BASE_MAIN * scale_factor
@@ -1273,7 +1273,7 @@ def create_poster(city, country, point, dist, output_file, output_format, width=
         font_main_adjusted = FontProperties(family='monospace', weight='black', size=adjusted_font_size)
 
     # --- BOTTOM TEXT ---
-    ax.text(0.5, 0.14, spaced_city, transform=ax.transAxes,
+    ax.text(0.5, 0.14, display_city, transform=ax.transAxes,
             color=THEME['text'], ha='center', fontproperties=font_main_adjusted, zorder=11)
     
     country_text = country_label if country_label is not None else country
