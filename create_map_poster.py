@@ -66,8 +66,145 @@ def cache_set(key: str, value):
         path = _cache_path(key)
         with open(path, "wb") as f:
             pickle.dump(value, f, protocol=pickle.HIGHEST_PROTOCOL)
+        # Update cache index
+        _update_cache_index(key, path)
     except Exception as e:
         raise CacheError(f"Cache write failed: {e}")
+
+
+def _update_cache_index(key: str, path: str):
+    """Update the cache index file with metadata about cached items."""
+    index_path = os.path.join(CACHE_DIR, "cache_index.jsonl")
+    entry = {
+        "key": key,
+        "path": path,
+        "timestamp": datetime.now().isoformat(),
+        "size_bytes": os.path.getsize(path) if os.path.exists(path) else 0
+    }
+    # Append to index file
+    with open(index_path, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
+def rebuild_cache_index():
+    """Rebuild cache index from existing .pkl files."""
+    if not os.path.exists(CACHE_DIR):
+        return
+
+    index_path = os.path.join(CACHE_DIR, "cache_index.jsonl")
+    # Clear existing index
+    if os.path.exists(index_path):
+        os.remove(index_path)
+
+    # Scan for .pkl files
+    for filename in os.listdir(CACHE_DIR):
+        if filename.endswith('.pkl'):
+            filepath = os.path.join(CACHE_DIR, filename)
+            key = filename[:-4]  # Remove .pkl extension
+            _update_cache_index(key, filepath)
+
+
+def list_cache():
+    """List all cached data with metadata."""
+    # First rebuild index from existing files if needed
+    index_path = os.path.join(CACHE_DIR, "cache_index.jsonl")
+    if not os.path.exists(index_path) and os.path.exists(CACHE_DIR):
+        print("Rebuilding cache index...")
+        rebuild_cache_index()
+
+    if not os.path.exists(index_path):
+        print("No cache found.")
+        return []
+
+    entries = []
+    seen_keys = set()
+    # Read all entries, keeping only the latest for each key
+    with open(index_path, "r") as f:
+        for line in f:
+            try:
+                entry = json.loads(line.strip())
+                entries.append(entry)
+            except json.JSONDecodeError:
+                continue
+
+    # Dedupe by key, keeping latest
+    unique_entries = {}
+    for entry in entries:
+        unique_entries[entry["key"]] = entry
+
+    # Display
+    print(f"\nCached data in {CACHE_DIR}/:")
+    print("-" * 60)
+    total_size = 0
+    for key, entry in sorted(unique_entries.items()):
+        if os.path.exists(entry["path"]):
+            size_mb = entry["size_bytes"] / (1024 * 1024)
+            total_size += entry["size_bytes"]
+            print(f"  {key}")
+            print(f"    Size: {size_mb:.2f} MB | Cached: {entry['timestamp'][:10]}")
+    print("-" * 60)
+    print(f"Total cache size: {total_size / (1024 * 1024):.2f} MB")
+    return list(unique_entries.values())
+
+
+def clear_cache(confirm=True):
+    """Clear all cached data."""
+    if not os.path.exists(CACHE_DIR):
+        print("Cache directory does not exist.")
+        return
+
+    if confirm:
+        response = input(f"Clear all cached data in {CACHE_DIR}/? [y/N]: ")
+        if response.lower() != 'y':
+            print("Cancelled.")
+            return
+
+    import shutil
+    shutil.rmtree(CACHE_DIR)
+    print(f"Cache cleared: {CACHE_DIR}/")
+
+
+def precache_city(city: str, country: str, radii: list = None):
+    """
+    Pre-fetch and cache data for a city at various radii.
+    This allows faster rendering later by having data already cached.
+    """
+    if radii is None:
+        # Default radii: small, medium, large, extra-large
+        radii = [5000, 10000, 20000, 40000]
+
+    print(f"\nPre-caching data for {city}, {country}...")
+    print(f"Radii to cache: {radii}")
+    print("=" * 50)
+
+    # Get coordinates
+    coords = get_coordinates(city, country)
+    lat, lon = coords
+
+    for dist in radii:
+        print(f"\n[Radius: {dist}m]")
+
+        # Fetch and cache street network
+        print(f"  Fetching street network...")
+        fetch_graph(coords, dist)
+
+        # Fetch and cache water
+        print(f"  Fetching water features...")
+        fetch_features(coords, dist, tags={'natural': 'water', 'waterway': 'riverbank'}, name='water')
+
+        # Fetch and cache parks
+        print(f"  Fetching parks...")
+        fetch_features(coords, dist, tags={'leisure': 'park', 'landuse': 'grass'}, name='parks')
+
+        # Fetch and cache buildings
+        print(f"  Fetching buildings...")
+        fetch_buildings(coords, dist)
+
+        print(f"  [OK] Cached data for {dist}m radius")
+
+    print("\n" + "=" * 50)
+    print(f"[OK] Pre-caching complete for {city}, {country}")
+    print("=" * 50)
 
 
 def load_fonts():
@@ -524,9 +661,10 @@ def polygon_to_3d_faces(polygon, height, base_z=0):
     return faces
 
 
-def create_building_mesh(buildings_gdf, theme, max_buildings=5000, simplify_tolerance=2.0):
+def create_building_mesh(buildings_gdf, theme, max_buildings=None, simplify_tolerance=2.0):
     """
     Build Poly3DCollection from building GeoDataFrame.
+    max_buildings: None means no limit (render all buildings)
     """
     if buildings_gdf is None or buildings_gdf.empty:
         return None
@@ -538,7 +676,7 @@ def create_building_mesh(buildings_gdf, theme, max_buildings=5000, simplify_tole
     buildings_poly = buildings_gdf[buildings_gdf.geometry.type.isin(['Polygon', 'MultiPolygon'])]
 
     for idx, row in buildings_poly.iterrows():
-        if building_count >= max_buildings:
+        if max_buildings is not None and building_count >= max_buildings:
             print(f"  Reached max buildings limit ({max_buildings})")
             break
 
@@ -552,7 +690,7 @@ def create_building_mesh(buildings_gdf, theme, max_buildings=5000, simplify_tole
                 faces = polygon_to_3d_faces(simplified, height)
                 all_faces.extend(faces)
                 building_count += 1
-                if building_count >= max_buildings:
+                if max_buildings is not None and building_count >= max_buildings:
                     break
         else:
             simplified = simplify_polygon(geom, simplify_tolerance)
@@ -582,7 +720,7 @@ def create_3d_poster(
     width=12, height=16, country_label=None, name_label=None,
     elevation=30.0, azimuth=-60.0,
     show_roads=True, show_water=True, show_parks=True,
-    max_buildings=5000, zoom=1.5
+    max_buildings=None, zoom=1.0
 ):
     """
     Create a 3D map poster with extruded buildings.
@@ -596,7 +734,9 @@ def create_3d_poster(
     with tqdm(total=4, desc="Fetching map data", unit="step", bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt}') as pbar:
         # 1. Fetch Street Network
         pbar.set_description("Downloading street network")
-        compensated_dist = dist * (max(height, width) / min(height, width)) / 4
+        # Fetch significantly more data for 3D - perspective projection needs
+        # much more coverage at edges to fill the frame like 2D version does
+        compensated_dist = dist * (max(height, width) / min(height, width)) * 1.5
         G = fetch_graph(point, compensated_dist) if show_roads else None
         pbar.update(1)
 
@@ -621,14 +761,11 @@ def create_3d_poster(
     print("Rendering 3D map...")
     fig = plt.figure(figsize=(width, height), facecolor=THEME['bg'])
 
-    # Create 3D axes that fills the figure (leave small margin for text at bottom)
-    ax = fig.add_axes([0, 0.15, 1, 0.85], projection='3d', facecolor=THEME['bg'])
+    # Create 3D axes filling the figure
+    ax = fig.add_axes([0, 0, 1, 1], projection='3d', facecolor=THEME['bg'])
 
     # Set viewing angle
     ax.view_init(elev=elevation, azim=azimuth)
-
-    # Disable automatic margins/padding
-    ax.set_proj_type('persp', focal_length=0.2)  # Adjust perspective for better fill
 
     # Project data to metric CRS
     if G is not None:
@@ -772,7 +909,7 @@ def create_3d_poster(
     ax.set_box_aspect([1, zoomed_y_extent/zoomed_x_extent, z_aspect])
 
     # Adjust camera distance to fill frame better
-    ax.dist = 8  # Lower value = closer/more zoomed (default is ~10)
+    ax.dist = 6  # Lower value = closer/more zoomed (default is ~10)
 
     # Add gradient fades at top and bottom using figure-level axes
     # Bottom gradient
@@ -1097,6 +1234,12 @@ Examples:
   # List themes
   uv run create_map_poster.py --list-themes
 
+  # Cache management
+  uv run create_map_poster.py --precache -c "Tokyo" -C "Japan"                 # Pre-cache at default radii
+  uv run create_map_poster.py --precache -c "Paris" -C "France" --precache-radii "5000,10000,20000"
+  uv run create_map_poster.py --list-cache                                      # Show cached data
+  uv run create_map_poster.py --clear-cache                                     # Clear all cache
+
 Options:
   --city, -c        City name (required)
   --country, -C     Country name (required)
@@ -1116,7 +1259,7 @@ Options:
   --no-roads        Hide roads in 3D mode
   --no-water        Hide water features in 3D mode
   --no-parks        Hide parks/green spaces in 3D mode
-  --max-buildings   Maximum buildings to render (default: 5000)
+  --max-buildings   Limit buildings for performance (default: no limit)
 
 Distance guide:
   4000-6000m   Small/dense cities (Venice, Amsterdam old center)
@@ -1189,10 +1332,20 @@ Examples:
                        help='Hide water features in 3D mode')
     parser.add_argument('--no-parks', dest='show_parks', action='store_false',
                        help='Hide parks/green spaces in 3D mode')
-    parser.add_argument('--max-buildings', type=int, default=5000,
-                       help='Maximum number of buildings to render (default: 5000)')
-    parser.add_argument('--zoom', type=float, default=1.5,
-                       help='Zoom factor to fill frame (default: 1.5, higher = more zoomed)')
+    parser.add_argument('--max-buildings', type=int, default=None,
+                       help='Limit number of buildings (default: no limit, render all)')
+    parser.add_argument('--zoom', type=float, default=1.0,
+                       help='Zoom factor (default: 1.0, higher = tighter crop on center)')
+
+    # Cache management arguments
+    parser.add_argument('--precache', action='store_true',
+                       help='Pre-fetch and cache data for a city (no render)')
+    parser.add_argument('--precache-radii', type=str, default=None,
+                       help='Comma-separated radii for precache (e.g., "5000,10000,20000")')
+    parser.add_argument('--list-cache', action='store_true',
+                       help='List all cached data')
+    parser.add_argument('--clear-cache', action='store_true',
+                       help='Clear all cached data')
 
     args = parser.parse_args()
     
@@ -1205,7 +1358,27 @@ Examples:
     if args.list_themes:
         list_themes()
         sys.exit(0)
-    
+
+    # Cache management commands
+    if args.list_cache:
+        list_cache()
+        sys.exit(0)
+
+    if args.clear_cache:
+        clear_cache(confirm=True)
+        sys.exit(0)
+
+    # Pre-cache mode
+    if args.precache:
+        if not args.city or not args.country:
+            print("Error: --city and --country are required for precache.\n")
+            sys.exit(1)
+        radii = None
+        if args.precache_radii:
+            radii = [int(r.strip()) for r in args.precache_radii.split(',')]
+        precache_city(args.city, args.country, radii)
+        sys.exit(0)
+
     # Validate required arguments
     if not args.city or not args.country:
         print("Error: --city and --country are required.\n")

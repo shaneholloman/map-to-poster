@@ -58,7 +58,7 @@ uv run create_map_poster.py --city <city> --country <country> [options]
 | `--no-roads` | Hide roads in 3D mode | false |
 | `--no-water` | Hide water features | false |
 | `--no-parks` | Hide parks/green spaces | false |
-| `--max-buildings` | Maximum buildings to render | 5000 |
+| `--max-buildings` | Limit buildings for performance | no limit |
 
 ### Resolution Guide (300 DPI)
 
