@@ -1,0 +1,14 @@
+# Cache
+cache/*
+.cache/
+
+# Virtual environments
+env/
+.env/
+.venv/
+
+# UV
+.python-version
+
+# macOS
+.DS_Store
