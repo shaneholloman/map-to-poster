@@ -11,5 +11,8 @@
   "road_secondary": "#A8893A",
   "road_tertiary": "#8B7355",
   "road_residential": "#6B5B4F",
-  "road_default": "#8B7355"
+  "road_default": "#8B7355",
+  "building_fill": "#1A3050",
+  "building_edge": "#C9A227",
+  "building_alpha": 0.85
 }

@@ -20,7 +20,9 @@ from hashlib import md5
 from typing import cast
 from geopandas import GeoDataFrame
 import pickle
-from shapely.geometry import Point
+from shapely.geometry import Point, Polygon as ShapelyPolygon
+from mpl_toolkits.mplot3d import Axes3D
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 class CacheError(Exception):
     """Raised when a cache operation fails."""
@@ -82,7 +84,7 @@ def load_fonts():
     # Verify fonts exist
     for weight, path in fonts.items():
         if not os.path.exists(path):
-            print(f"⚠ Font not found: {path}")
+            print(f"WARNING: Font not found: {path}")
             return None
     
     return fonts
@@ -124,7 +126,7 @@ def load_theme(theme_name="feature_based"):
     theme_file = os.path.join(THEMES_DIR, f"{theme_name}.json")
     
     if not os.path.exists(theme_file):
-        print(f"⚠ Theme file '{theme_file}' not found. Using default feature_based theme.")
+        print(f"WARNING: Theme file '{theme_file}' not found. Using default feature_based theme.")
         # Fallback to embedded default theme
         return {
             "name": "Feature-Based Shading",
@@ -138,12 +140,22 @@ def load_theme(theme_name="feature_based"):
             "road_secondary": "#2A2A2A",
             "road_tertiary": "#3A3A3A",
             "road_residential": "#4A4A4A",
-            "road_default": "#3A3A3A"
+            "road_default": "#3A3A3A",
+            "building_fill": "#808080",
+            "building_edge": "#404040",
+            "building_alpha": 0.85
         }
-    
+
     with open(theme_file, 'r') as f:
         theme = json.load(f)
-        print(f"✓ Loaded theme: {theme.get('name', theme_name)}")
+        # Add building color fallbacks if not present in theme
+        if 'building_fill' not in theme:
+            theme['building_fill'] = '#808080'
+        if 'building_edge' not in theme:
+            theme['building_edge'] = '#404040'
+        if 'building_alpha' not in theme:
+            theme['building_alpha'] = 0.85
+        print(f"[OK] Loaded theme: {theme.get('name', theme_name)}")
         if 'description' in theme:
             print(f"  {theme['description']}")
         return theme
@@ -255,7 +267,7 @@ def get_coordinates(city, country):
     coords = f"coords_{city.lower()}_{country.lower()}"
     cached = cache_get(coords)
     if cached:
-        print(f"✓ Using cached coordinates for {city}, {country}")
+        print(f"[OK] Using cached coordinates for {city}, {country}")
         return cached
 
     print("Looking up coordinates...")
@@ -285,10 +297,10 @@ def get_coordinates(city, country):
         # Use getattr to safely access address (helps static analyzers)
         addr = getattr(location, "address", None)
         if addr:
-            print(f"✓ Found: {addr}")
+            print(f"[OK] Found: {addr}")
         else:
-            print("✓ Found location (address not available)")
-        print(f"✓ Coordinates: {location.latitude}, {location.longitude}")
+            print("[OK] Found location (address not available)")
+        print(f"[OK] Coordinates: {location.latitude}, {location.longitude}")
         try:
             cache_set(coords, (location.latitude, location.longitude))
         except CacheError as e:
@@ -338,7 +350,7 @@ def fetch_graph(point, dist) -> MultiDiGraph | None:
     graph = f"graph_{lat}_{lon}_{dist}"
     cached = cache_get(graph)
     if cached is not None:
-        print("✓ Using cached street network")
+        print("[OK] Using cached street network")
         return cast(MultiDiGraph, cached)
 
     try:
@@ -360,7 +372,7 @@ def fetch_features(point, dist, tags, name) -> GeoDataFrame | None:
     features = f"{name}_{lat}_{lon}_{dist}_{tag_str}"
     cached = cache_get(features)
     if cached is not None:
-        print(f"✓ Using cached {name}")
+        print(f"[OK] Using cached {name}")
         return cast(GeoDataFrame, cached)
 
     try:
@@ -376,6 +388,497 @@ def fetch_features(point, dist, tags, name) -> GeoDataFrame | None:
         print(f"OSMnx error while fetching features: {e}")
         return None
 
+
+def fetch_buildings(point, dist) -> GeoDataFrame | None:
+    """
+    Fetch building footprints from OSM with height-related tags.
+    """
+    lat, lon = point
+    cache_key = f"buildings_{lat}_{lon}_{dist}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        print("[OK] Using cached building data")
+        return cast(GeoDataFrame, cached)
+
+    try:
+        # Fetch buildings with height tags
+        buildings = ox.features_from_point(
+            point,
+            tags={'building': True},
+            dist=dist
+        )
+        time.sleep(0.3)
+        try:
+            cache_set(cache_key, buildings)
+        except CacheError as e:
+            print(e)
+        return buildings
+    except Exception as e:
+        print(f"OSMnx error while fetching buildings: {e}")
+        return None
+
+
+def extract_building_height(row, default_height=12.0, height_per_level=3.5, max_height=200.0):
+    """
+    Extract building height from OSM tags.
+    Priority: height tag > building:levels > default
+    Heights are capped at max_height for visualization.
+    """
+    height_value = None
+
+    # Try direct height tag (in meters)
+    height = row.get('height')
+    if height is not None:
+        try:
+            # Handle strings like "25 m" or "25"
+            if isinstance(height, str):
+                height = height.replace('m', '').strip()
+            height_value = float(height)
+        except (ValueError, TypeError):
+            pass
+
+    # Try building:levels tag
+    if height_value is None:
+        levels = row.get('building:levels')
+        if levels is not None:
+            try:
+                if isinstance(levels, str):
+                    levels = levels.strip()
+                height_value = float(levels) * height_per_level
+            except (ValueError, TypeError):
+                pass
+
+    # Default height based on building type
+    if height_value is None:
+        building_type = row.get('building', '')
+        if isinstance(building_type, str):
+            if building_type in ['skyscraper', 'tower']:
+                height_value = 80.0
+            elif building_type in ['apartments', 'office', 'commercial']:
+                height_value = 25.0
+            elif building_type in ['house', 'residential', 'detached']:
+                height_value = 8.0
+            elif building_type in ['garage', 'shed', 'hut']:
+                height_value = 4.0
+            else:
+                height_value = default_height
+        else:
+            height_value = default_height
+
+    # Cap at max_height for reasonable visualization
+    return min(height_value, max_height)
+
+
+def simplify_polygon(geom, tolerance=2.0):
+    """
+    Simplify polygon geometry to reduce vertex count for performance.
+    """
+    if geom is None:
+        return None
+    try:
+        simplified = geom.simplify(tolerance, preserve_topology=True)
+        return simplified
+    except Exception:
+        return geom
+
+
+def polygon_to_3d_faces(polygon, height, base_z=0):
+    """
+    Convert a 2D polygon to 3D box faces for Poly3DCollection.
+    Returns list of faces (bottom, top, and sides).
+    """
+    if polygon is None or polygon.is_empty:
+        return []
+
+    faces = []
+
+    # Get exterior coordinates
+    if hasattr(polygon, 'exterior'):
+        coords = list(polygon.exterior.coords)
+    else:
+        return []
+
+    if len(coords) < 4:  # Need at least 3 points + closing point
+        return []
+
+    # Bottom face (z = base_z)
+    bottom = [(x, y, base_z) for x, y in coords[:-1]]
+    faces.append(bottom)
+
+    # Top face (z = base_z + height)
+    top = [(x, y, base_z + height) for x, y in coords[:-1]]
+    faces.append(top)
+
+    # Side faces (walls)
+    for i in range(len(coords) - 1):
+        x1, y1 = coords[i]
+        x2, y2 = coords[i + 1]
+        side = [
+            (x1, y1, base_z),
+            (x2, y2, base_z),
+            (x2, y2, base_z + height),
+            (x1, y1, base_z + height)
+        ]
+        faces.append(side)
+
+    return faces
+
+
+def create_building_mesh(buildings_gdf, theme, max_buildings=5000, simplify_tolerance=2.0):
+    """
+    Build Poly3DCollection from building GeoDataFrame.
+    """
+    if buildings_gdf is None or buildings_gdf.empty:
+        return None
+
+    all_faces = []
+    building_count = 0
+
+    # Filter to polygon geometries only
+    buildings_poly = buildings_gdf[buildings_gdf.geometry.type.isin(['Polygon', 'MultiPolygon'])]
+
+    for idx, row in buildings_poly.iterrows():
+        if building_count >= max_buildings:
+            print(f"  Reached max buildings limit ({max_buildings})")
+            break
+
+        geom = row.geometry
+        height = extract_building_height(row)
+
+        # Handle MultiPolygon
+        if geom.geom_type == 'MultiPolygon':
+            for poly in geom.geoms:
+                simplified = simplify_polygon(poly, simplify_tolerance)
+                faces = polygon_to_3d_faces(simplified, height)
+                all_faces.extend(faces)
+                building_count += 1
+                if building_count >= max_buildings:
+                    break
+        else:
+            simplified = simplify_polygon(geom, simplify_tolerance)
+            faces = polygon_to_3d_faces(simplified, height)
+            all_faces.extend(faces)
+            building_count += 1
+
+    if not all_faces:
+        return None
+
+    print(f"  Created mesh for {building_count} buildings ({len(all_faces)} faces)")
+
+    # Create Poly3DCollection
+    mesh = Poly3DCollection(
+        all_faces,
+        facecolors=theme.get('building_fill', '#808080'),
+        edgecolors=theme.get('building_edge', '#404040'),
+        linewidths=0.2,
+        alpha=theme.get('building_alpha', 0.85)
+    )
+
+    return mesh
+
+
+def create_3d_poster(
+    city, country, point, dist, output_file, output_format,
+    width=12, height=16, country_label=None, name_label=None,
+    elevation=30.0, azimuth=-60.0,
+    show_roads=True, show_water=True, show_parks=True,
+    max_buildings=5000, zoom=1.5
+):
+    """
+    Create a 3D map poster with extruded buildings.
+
+    Args:
+        zoom: Zoom factor to fill the frame (1.0 = default, higher = more zoomed in)
+    """
+    print(f"\nGenerating 3D map for {city}, {country}...")
+
+    # Progress bar for data fetching
+    with tqdm(total=4, desc="Fetching map data", unit="step", bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt}') as pbar:
+        # 1. Fetch Street Network
+        pbar.set_description("Downloading street network")
+        compensated_dist = dist * (max(height, width) / min(height, width)) / 4
+        G = fetch_graph(point, compensated_dist) if show_roads else None
+        pbar.update(1)
+
+        # 2. Fetch Water Features
+        pbar.set_description("Downloading water features")
+        water = fetch_features(point, compensated_dist, tags={'natural': 'water', 'waterway': 'riverbank'}, name='water') if show_water else None
+        pbar.update(1)
+
+        # 3. Fetch Parks
+        pbar.set_description("Downloading parks/green spaces")
+        parks = fetch_features(point, compensated_dist, tags={'leisure': 'park', 'landuse': 'grass'}, name='parks') if show_parks else None
+        pbar.update(1)
+
+        # 4. Fetch Buildings
+        pbar.set_description("Downloading building data")
+        buildings = fetch_buildings(point, compensated_dist)
+        pbar.update(1)
+
+    print("[OK] All data retrieved successfully!")
+
+    # Setup 3D figure
+    print("Rendering 3D map...")
+    fig = plt.figure(figsize=(width, height), facecolor=THEME['bg'])
+
+    # Create 3D axes that fills the figure (leave small margin for text at bottom)
+    ax = fig.add_axes([0, 0.15, 1, 0.85], projection='3d', facecolor=THEME['bg'])
+
+    # Set viewing angle
+    ax.view_init(elev=elevation, azim=azimuth)
+
+    # Disable automatic margins/padding
+    ax.set_proj_type('persp', focal_length=0.2)  # Adjust perspective for better fill
+
+    # Project data to metric CRS
+    if G is not None:
+        G_proj = ox.project_graph(G)
+        crs = G_proj.graph['crs']
+    elif buildings is not None:
+        # Use buildings to determine CRS
+        buildings_proj = ox.projection.project_gdf(buildings)
+        crs = buildings_proj.crs
+    else:
+        print("ERROR: No data to render")
+        return
+
+    # Get bounds from graph or estimate from point
+    if G is not None:
+        crop_xlim, crop_ylim = get_crop_limits(G_proj, point, fig, compensated_dist)
+        xlim = crop_xlim
+        ylim = crop_ylim
+    else:
+        # Estimate bounds from point
+        center = ox.projection.project_geometry(
+            Point(point[1], point[0]),
+            crs="EPSG:4326",
+            to_crs=crs
+        )[0]
+        half = compensated_dist
+        xlim = (center.x - half, center.x + half)
+        ylim = (center.y - half, center.y + half)
+
+    # Layer 1: Water (as flat polygons at z=0)
+    if water is not None and not water.empty:
+        water_polys = water[water.geometry.type.isin(['Polygon', 'MultiPolygon'])]
+        if not water_polys.empty:
+            try:
+                water_polys = ox.projection.project_gdf(water_polys)
+            except Exception:
+                if crs:
+                    water_polys = water_polys.to_crs(crs)
+
+            for geom in water_polys.geometry:
+                if geom.geom_type == 'Polygon':
+                    x, y = geom.exterior.xy
+                    ax.plot(x, y, zs=0, zdir='z', color=THEME['water'], linewidth=0.5)
+                elif geom.geom_type == 'MultiPolygon':
+                    for poly in geom.geoms:
+                        x, y = poly.exterior.xy
+                        ax.plot(x, y, zs=0, zdir='z', color=THEME['water'], linewidth=0.5)
+
+    # Layer 2: Parks (as flat polygons at z=0)
+    if parks is not None and not parks.empty:
+        parks_polys = parks[parks.geometry.type.isin(['Polygon', 'MultiPolygon'])]
+        if not parks_polys.empty:
+            try:
+                parks_polys = ox.projection.project_gdf(parks_polys)
+            except Exception:
+                if crs:
+                    parks_polys = parks_polys.to_crs(crs)
+
+            for geom in parks_polys.geometry:
+                if geom.geom_type == 'Polygon':
+                    x, y = geom.exterior.xy
+                    ax.plot(x, y, zs=0, zdir='z', color=THEME['parks'], linewidth=0.5)
+                elif geom.geom_type == 'MultiPolygon':
+                    for poly in geom.geoms:
+                        x, y = poly.exterior.xy
+                        ax.plot(x, y, zs=0, zdir='z', color=THEME['parks'], linewidth=0.5)
+
+    # Layer 3: Roads (as lines at z=0)
+    if G is not None and show_roads:
+        print("  Drawing roads...")
+        for u, v, data in G_proj.edges(data=True):
+            if 'geometry' in data:
+                xs, ys = data['geometry'].xy
+            else:
+                xs = [G_proj.nodes[u]['x'], G_proj.nodes[v]['x']]
+                ys = [G_proj.nodes[u]['y'], G_proj.nodes[v]['y']]
+
+            highway = data.get('highway', 'unclassified')
+            if isinstance(highway, list):
+                highway = highway[0] if highway else 'unclassified'
+
+            # Get color based on road type
+            if highway in ['motorway', 'motorway_link']:
+                color = THEME['road_motorway']
+                width_val = 1.0
+            elif highway in ['trunk', 'trunk_link', 'primary', 'primary_link']:
+                color = THEME['road_primary']
+                width_val = 0.8
+            elif highway in ['secondary', 'secondary_link']:
+                color = THEME['road_secondary']
+                width_val = 0.6
+            elif highway in ['tertiary', 'tertiary_link']:
+                color = THEME['road_tertiary']
+                width_val = 0.4
+            else:
+                color = THEME['road_residential']
+                width_val = 0.3
+
+            ax.plot(xs, ys, zs=0, zdir='z', color=color, linewidth=width_val)
+
+    # Layer 4: Buildings (3D extruded)
+    if buildings is not None and not buildings.empty:
+        print("  Creating building mesh...")
+        try:
+            buildings_proj = ox.projection.project_gdf(buildings)
+        except Exception:
+            if crs:
+                buildings_proj = buildings.to_crs(crs)
+            else:
+                buildings_proj = buildings
+
+        mesh = create_building_mesh(buildings_proj, THEME, max_buildings=max_buildings)
+        if mesh is not None:
+            ax.add_collection3d(mesh)
+
+    # Calculate actual extents
+    x_extent = xlim[1] - xlim[0]
+    y_extent = ylim[1] - ylim[0]
+    x_center = (xlim[0] + xlim[1]) / 2
+    y_center = (ylim[0] + ylim[1]) / 2
+
+    # Apply zoom factor - shrink the visible area to zoom in
+    zoomed_x_extent = x_extent / zoom
+    zoomed_y_extent = y_extent / zoom
+
+    # Set zoomed axis limits
+    ax.set_xlim(x_center - zoomed_x_extent/2, x_center + zoomed_x_extent/2)
+    ax.set_ylim(y_center - zoomed_y_extent/2, y_center + zoomed_y_extent/2)
+
+    # Max building height for visualization
+    max_z = 200
+    ax.set_zlim(0, max_z)
+
+    # Hide axes for cleaner look
+    ax.set_axis_off()
+
+    # Calculate proper Z aspect ratio based on zoomed extent
+    z_aspect = max_z / zoomed_x_extent
+
+    # Set aspect ratio with proper Z scaling
+    ax.set_box_aspect([1, zoomed_y_extent/zoomed_x_extent, z_aspect])
+
+    # Adjust camera distance to fill frame better
+    ax.dist = 8  # Lower value = closer/more zoomed (default is ~10)
+
+    # Add gradient fades at top and bottom using figure-level axes
+    # Bottom gradient
+    gradient_ax_bottom = fig.add_axes([0, 0, 1, 0.25], zorder=10)
+    gradient_ax_bottom.set_xlim(0, 1)
+    gradient_ax_bottom.set_ylim(0, 1)
+    gradient_ax_bottom.axis('off')
+    gradient_vals = np.linspace(0, 1, 256).reshape(-1, 1)
+    gradient_img = np.hstack((gradient_vals, gradient_vals))
+    rgb = mcolors.to_rgb(THEME['gradient_color'])
+    gradient_colors = np.zeros((256, 4))
+    gradient_colors[:, 0] = rgb[0]
+    gradient_colors[:, 1] = rgb[1]
+    gradient_colors[:, 2] = rgb[2]
+    gradient_colors[:, 3] = np.linspace(1, 0, 256)
+    gradient_cmap = mcolors.ListedColormap(gradient_colors)
+    gradient_ax_bottom.imshow(gradient_img, extent=[0, 1, 0, 1], aspect='auto',
+                               cmap=gradient_cmap, origin='lower')
+
+    # Top gradient
+    gradient_ax_top = fig.add_axes([0, 0.85, 1, 0.15], zorder=10)
+    gradient_ax_top.set_xlim(0, 1)
+    gradient_ax_top.set_ylim(0, 1)
+    gradient_ax_top.axis('off')
+    gradient_colors_top = np.zeros((256, 4))
+    gradient_colors_top[:, 0] = rgb[0]
+    gradient_colors_top[:, 1] = rgb[1]
+    gradient_colors_top[:, 2] = rgb[2]
+    gradient_colors_top[:, 3] = np.linspace(0, 1, 256)
+    gradient_cmap_top = mcolors.ListedColormap(gradient_colors_top)
+    gradient_ax_top.imshow(gradient_img, extent=[0, 1, 0, 1], aspect='auto',
+                            cmap=gradient_cmap_top, origin='lower')
+
+    # Typography - match 2D version style
+    scale_factor = width / 12.0
+    BASE_MAIN = 60
+    BASE_SUB = 22
+    BASE_COORDS = 14
+    BASE_ATTR = 8
+
+    if FONTS:
+        font_main = FontProperties(fname=FONTS['bold'], size=BASE_MAIN * scale_factor)
+        font_sub = FontProperties(fname=FONTS['light'], size=BASE_SUB * scale_factor)
+        font_coords = FontProperties(fname=FONTS['regular'], size=BASE_COORDS * scale_factor)
+        font_attr = FontProperties(fname=FONTS['light'], size=BASE_ATTR * scale_factor)
+    else:
+        font_main = FontProperties(family='monospace', weight='bold', size=BASE_MAIN * scale_factor)
+        font_sub = FontProperties(family='monospace', weight='normal', size=BASE_SUB * scale_factor)
+        font_coords = FontProperties(family='monospace', size=BASE_COORDS * scale_factor)
+        font_attr = FontProperties(family='monospace', size=BASE_ATTR * scale_factor)
+
+    # Spaced city name like 2D version
+    spaced_city = "  ".join(list(city.upper()))
+
+    # Adjust font size for long city names
+    base_adjusted_main = BASE_MAIN * scale_factor
+    city_char_count = len(city)
+    if city_char_count > 10:
+        length_factor = 10 / city_char_count
+        adjusted_font_size = max(base_adjusted_main * length_factor, 10 * scale_factor)
+    else:
+        adjusted_font_size = base_adjusted_main
+
+    if FONTS:
+        font_main_adjusted = FontProperties(fname=FONTS['bold'], size=adjusted_font_size)
+    else:
+        font_main_adjusted = FontProperties(family='monospace', weight='bold', size=adjusted_font_size)
+
+    # Text overlay (using figure coordinates)
+    fig.text(0.5, 0.14, spaced_city, ha='center', va='bottom',
+             fontproperties=font_main_adjusted, color=THEME['text'], zorder=11)
+
+    # Decorative line
+    line_ax = fig.add_axes([0.4, 0.125, 0.2, 0.001], zorder=11)
+    line_ax.axhline(y=0.5, color=THEME['text'], linewidth=1 * scale_factor)
+    line_ax.axis('off')
+
+    country_text = country_label if country_label else country
+    fig.text(0.5, 0.10, country_text.upper(), ha='center', va='bottom',
+             fontproperties=font_sub, color=THEME['text'], zorder=11)
+
+    # Coordinates
+    lat, lon = point
+    coords_text = f"{lat:.4f} N / {lon:.4f} E" if lat >= 0 else f"{abs(lat):.4f} S / {lon:.4f} E"
+    if lon < 0:
+        coords_text = coords_text.replace("E", "W")
+    fig.text(0.5, 0.07, coords_text, ha='center', va='bottom',
+             fontproperties=font_coords, color=THEME['text'], alpha=0.7, zorder=11)
+
+    # Attribution
+    fig.text(0.98, 0.02, "OpenStreetMap contributors", ha='right', va='bottom',
+             fontproperties=font_attr, color=THEME['text'], alpha=0.5, zorder=11)
+
+    # Save
+    print(f"Saving to {output_file}...")
+
+    fmt = output_format.lower()
+    save_kwargs = dict(facecolor=THEME["bg"], bbox_inches="tight", pad_inches=0.05)
+
+    if fmt == "png":
+        save_kwargs["dpi"] = 300
+
+    plt.savefig(output_file, format=fmt, **save_kwargs)
+    plt.close()
+
+    print(f"[OK] Done! 3D poster saved as {output_file}")
 
 
 def create_poster(city, country, point, dist, output_file, output_format, width=12, height=16, country_label=None, name_label=None):
@@ -401,7 +904,7 @@ def create_poster(city, country, point, dist, output_file, output_format, width=
         parks = fetch_features(point, compensated_dist, tags={'leisure': 'park', 'landuse': 'grass'}, name='parks')
         pbar.update(1)
     
-    print("✓ All data retrieved successfully!")
+    print("[OK] All data retrieved successfully!")
     
     # 2. Setup Plot
     print("Rendering map...")
@@ -545,7 +1048,7 @@ def create_poster(city, country, point, dist, output_file, output_format, width=
     plt.savefig(output_file, format=fmt, **save_kwargs)
 
     plt.close()
-    print(f"✓ Done! Poster saved as {output_file}")
+    print(f"[OK] Done! Poster saved as {output_file}")
 
 
 def print_examples():
@@ -561,30 +1064,36 @@ Examples:
   # Iconic grid patterns
   uv run create_map_poster.py -c "New York" -C "USA" -t noir -d 12000           # Manhattan grid
   uv run create_map_poster.py -c "Barcelona" -C "Spain" -t warm_beige -d 8000   # Eixample district grid
-  
+
   # Waterfront & canals
   uv run create_map_poster.py -c "Venice" -C "Italy" -t blueprint -d 4000       # Canal network
   uv run create_map_poster.py -c "Amsterdam" -C "Netherlands" -t ocean -d 6000  # Concentric canals
   uv run create_map_poster.py -c "Dubai" -C "UAE" -t midnight_blue -d 15000     # Palm & coastline
-  
+
   # Radial patterns
   uv run create_map_poster.py -c "Paris" -C "France" -t pastel_dream -d 10000   # Haussmann boulevards
   uv run create_map_poster.py -c "Moscow" -C "Russia" -t noir -d 12000          # Ring roads
-  
+
   # Organic old cities
   uv run create_map_poster.py -c "Tokyo" -C "Japan" -t japanese_ink -d 15000    # Dense organic streets
   uv run create_map_poster.py -c "Marrakech" -C "Morocco" -t terracotta -d 5000 # Medina maze
   uv run create_map_poster.py -c "Rome" -C "Italy" -t warm_beige -d 8000        # Ancient street layout
-  
+
   # Coastal cities
   uv run create_map_poster.py -c "San Francisco" -C "USA" -t sunset -d 10000    # Peninsula grid
   uv run create_map_poster.py -c "Sydney" -C "Australia" -t ocean -d 12000      # Harbor city
   uv run create_map_poster.py -c "Mumbai" -C "India" -t contrast_zones -d 18000 # Coastal peninsula
-  
+
   # River cities
   uv run create_map_poster.py -c "London" -C "UK" -t noir -d 15000              # Thames curves
   uv run create_map_poster.py -c "Budapest" -C "Hungary" -t copper_patina -d 8000  # Danube split
-  
+
+  # 3D Building Visualization
+  uv run create_map_poster.py -c "Manhattan" -C "USA" -t noir --3d -d 5000      # NYC skyline
+  uv run create_map_poster.py -c "Paris" -C "France" --3d --elevation 45        # Higher camera angle
+  uv run create_map_poster.py -c "Venice" -C "Italy" --3d --no-roads            # Buildings only
+  uv run create_map_poster.py -c "Tokyo" -C "Japan" --3d --azimuth -45 -d 8000  # Different view angle
+
   # List themes
   uv run create_map_poster.py --list-themes
 
@@ -596,6 +1105,18 @@ Options:
   --all-themes      Generate posters for all themes
   --distance, -d    Map radius in meters (default: 29000)
   --list-themes     List all available themes
+
+3D Mode Options:
+  --3d, --buildings Enable 3D building visualization
+  --elevation       Camera elevation angle in degrees (default: 30.0)
+                    Low values (15-25) = dramatic street-level view
+                    High values (50-70) = more top-down architectural view
+  --azimuth         Camera rotation angle in degrees (default: -60.0)
+  --zoom            Frame fill factor (default: 1.5, higher = more zoomed)
+  --no-roads        Hide roads in 3D mode
+  --no-water        Hide water features in 3D mode
+  --no-parks        Hide parks/green spaces in 3D mode
+  --max-buildings   Maximum buildings to render (default: 5000)
 
 Distance guide:
   4000-6000m   Small/dense cities (Venice, Amsterdam old center)
@@ -654,7 +1175,25 @@ Examples:
     parser.add_argument('--height', '-H', type=float, default=16, help='Image height in inches (default: 16)')
     parser.add_argument('--list-themes', action='store_true', help='List all available themes')
     parser.add_argument('--format', '-f', default='png', choices=['png', 'svg', 'pdf'],help='Output format for the poster (default: png)')
-    
+
+    # 3D mode arguments
+    parser.add_argument('--3d', '--buildings', dest='enable_3d', action='store_true',
+                       help='Enable 3D building visualization mode')
+    parser.add_argument('--elevation', type=float, default=30.0,
+                       help='Camera elevation angle in degrees (default: 30.0)')
+    parser.add_argument('--azimuth', type=float, default=-60.0,
+                       help='Camera azimuth angle in degrees (default: -60.0)')
+    parser.add_argument('--no-roads', dest='show_roads', action='store_false',
+                       help='Hide roads in 3D mode')
+    parser.add_argument('--no-water', dest='show_water', action='store_false',
+                       help='Hide water features in 3D mode')
+    parser.add_argument('--no-parks', dest='show_parks', action='store_false',
+                       help='Hide parks/green spaces in 3D mode')
+    parser.add_argument('--max-buildings', type=int, default=5000,
+                       help='Maximum number of buildings to render (default: 5000)')
+    parser.add_argument('--zoom', type=float, default=1.5,
+                       help='Zoom factor to fill frame (default: 1.5, higher = more zoomed)')
+
     args = parser.parse_args()
     
     # If no arguments provided, show examples
@@ -697,14 +1236,35 @@ Examples:
         for theme_name in themes_to_generate:
             THEME = load_theme(theme_name)
             output_file = generate_output_filename(args.city, theme_name, args.format)
-            create_poster(args.city, args.country, coords, args.distance, output_file, args.format, args.width, args.height, country_label=args.country_label)
-        
+
+            if args.enable_3d:
+                # 3D mode with extruded buildings
+                create_3d_poster(
+                    args.city, args.country, coords, args.distance,
+                    output_file, args.format, args.width, args.height,
+                    country_label=args.country_label,
+                    elevation=args.elevation,
+                    azimuth=args.azimuth,
+                    show_roads=args.show_roads,
+                    show_water=args.show_water,
+                    show_parks=args.show_parks,
+                    max_buildings=args.max_buildings,
+                    zoom=args.zoom
+                )
+            else:
+                # Standard 2D mode
+                create_poster(
+                    args.city, args.country, coords, args.distance,
+                    output_file, args.format, args.width, args.height,
+                    country_label=args.country_label
+                )
+
         print("\n" + "=" * 50)
-        print("✓ Poster generation complete!")
+        print("[OK] Poster generation complete!")
         print("=" * 50)
         
     except Exception as e:
-        print(f"\n✗ Error: {e}")
+        print(f"\nERROR: Error: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
