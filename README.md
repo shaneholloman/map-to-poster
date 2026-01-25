@@ -2,23 +2,6 @@
 
 Generate beautiful, minimalist map posters for any city in the world.
 
-<img src="posters/singapore_neon_cyberpunk_20260118_153328.png" width="250">
-<img src="posters/dubai_midnight_blue_20260118_140807.png" width="250">
-
-## Examples
-
-|  Country  |     City      |     Theme      |                                    Poster                                    |
-| :-------: | :-----------: | :------------: | :--------------------------------------------------------------------------: |
-|    USA    | San Francisco |     sunset     |   <img src="posters/san_francisco_sunset_20260118_144726.png" width="250">   |
-|   Spain   |   Barcelona   |   warm_beige   |   <img src="posters/barcelona_warm_beige_20260118_140048.png" width="250">   |
-|   Italy   |    Venice     |   blueprint    |     <img src="posters/venice_blueprint_20260118_140505.png" width="250">     |
-|   Japan   |     Tokyo     |  japanese_ink  |    <img src="posters/tokyo_japanese_ink_20260118_142446.png" width="250">    |
-|   India   |    Mumbai     | contrast_zones |  <img src="posters/mumbai_contrast_zones_20260118_145843.png" width="250">   |
-|  Morocco  |   Marrakech   |   terracotta   |   <img src="posters/marrakech_terracotta_20260118_143253.png" width="250">   |
-| Singapore |   Singapore   | neon_cyberpunk | <img src="posters/singapore_neon_cyberpunk_20260118_153328.png" width="250"> |
-| Australia |   Melbourne   |     forest     |     <img src="posters/melbourne_forest_20260118_153446.png" width="250">     |
-|    UAE    |     Dubai     | midnight_blue  |   <img src="posters/dubai_midnight_blue_20260118_140807.png" width="250">    |
-
 ## Installation
 
 ```bash
@@ -71,7 +54,7 @@ Use these values for `-W` and `-H` to target specific resolutions:
 | **4K Wallpaper**     | 3840 x 2160     | 12.8 x 7.2       |
 | **A4 Print**         | 2480 x 3508     | 8.3 x 11.7       |
 
-### Examples
+### Example Commands
 
 ```bash
 # Iconic grid patterns
@@ -181,7 +164,7 @@ The `--3d` flag enables true 3D building extrusion using OSM building data. Buil
 
 Posters are saved to `posters/` directory with format:
 
-```
+```txt
 {city}_{theme}_{YYYYMMDD_HHMMSS}.png
 ```
 
@@ -214,7 +197,7 @@ Building properties are optional (fallback defaults are provided) but recommende
 
 ## Project Structure
 
-```
+```tree
 map_poster/
 ├── map.py          # Main script
 ├── themes/               # Theme JSON files
@@ -229,7 +212,7 @@ Quick reference for contributors who want to extend or modify the script.
 
 ### Architecture Overview
 
-```
+```txt
 ┌─────────────────┐     ┌──────────────┐     ┌─────────────────┐
 │   CLI Parser    │────▶│  Geocoding   │────▶│  Data Fetching  │
 │   (argparse)    │     │  (Nominatim) │     │    (OSMnx)      │
@@ -261,7 +244,7 @@ Quick reference for contributors who want to extend or modify the script.
 
 2D Mode:
 
-```
+```txt
 z=11  Text labels (city, country, coords)
 z=10  Gradient fades (top & bottom)
 z=3   Roads (via ox.plot_graph)
@@ -272,7 +255,7 @@ z=0   Background color
 
 3D Mode:
 
-```
+```txt
 Layer 4: Buildings (Poly3DCollection, extruded)
 Layer 3: Roads (3D lines at z=0)
 Layer 2: Parks (3D lines at z=0)
@@ -317,7 +300,7 @@ if railways is not None and not railways.empty:
 
 All text uses `transform=ax.transAxes` (0-1 normalized coordinates):
 
-```
+```txt
 y=0.14  City name (spaced letters)
 y=0.125 Decorative line
 y=0.10  Country name
@@ -340,7 +323,7 @@ G = ox.graph_from_point(point, dist=dist, network_type='bike')   # bike paths
 G = ox.graph_from_point(point, dist=dist, network_type='walk')   # pedestrian
 ```
 
-### Performance Tips
+### Tips
 
 - Large `dist` values (>20km) = slow downloads + memory heavy
 - Cache coordinates locally to avoid Nominatim rate limits
