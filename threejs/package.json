@@ -1,0 +1,22 @@
+{
+  "name": "map-poster-3d",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "three": "^0.170.0",
+    "playwright": "^1.57.0",
+    "commander": "^13.0.0",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/three": "^0.170.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
