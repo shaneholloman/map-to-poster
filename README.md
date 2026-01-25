@@ -206,11 +206,11 @@ map_poster/
 └── README.md
 ```
 
-## Hacker's Guide
+## General Guide
 
 Quick reference for contributors who want to extend or modify the script.
 
-### Architecture Overview
+### Architecture
 
 ```txt
 ┌─────────────────┐     ┌──────────────┐     ┌─────────────────┐
@@ -225,7 +225,7 @@ Quick reference for contributors who want to extend or modify the script.
                                              └─────────────────┘
 ```
 
-### Key Functions
+### Functions
 
 | Function                    | Purpose                        | Modify when...                |
 | --------------------------- | ------------------------------ | ----------------------------- |
